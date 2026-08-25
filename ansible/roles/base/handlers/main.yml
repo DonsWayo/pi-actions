@@ -4,10 +4,3 @@
     dest: /etc/hostname
     content: "{{ runner_name | lower }}\n"
     mode: "0644"
-
-- name: Restart networking
-  ansible.builtin.systemd:
-    name: systemd-networkd
-    state: restarted
-    daemon_reload: true
-  listen: Restart networking
