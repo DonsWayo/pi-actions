@@ -1,0 +1,18 @@
+# Copy to terraform.tfvars and fill in.
+# Get a token with scopes: repo (private repos) or admin:org (org runner groups)
+# and export it as GITHUB_TOKEN.
+
+github_owner = "your-github-username-or-org"
+repo_name    = "pi-actions"
+
+create_repo    = true
+repo_visibility = "public"
+
+runner_name = "pi-runner-01"
+runner_scope = "repo"                  # "repo" | "org"
+runner_group = "default"               # org runner group when scope == "org"
+runner_labels = ["pi", "arm64", "linux", "self-hosted"]
+
+# Optional — set to flash the card for a specific network from Terraform.
+# wifi_ssid = "MyNetwork"
+# wifi_password = "secret"

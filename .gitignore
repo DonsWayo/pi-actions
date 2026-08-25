@@ -1,0 +1,63 @@
+# Terraform
+**/.terraform/*
+**/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+terraform.tfvars.json
+terraform.rc
+crash.log
+crash.*.log
+
+# Rendered cloud-init (contains the registration token)
+terraform/generated/
+
+# Ansible
+ansible/.retry
+ansible/runners
+ansible/*.retry
+*.retry
+ansible/inventory.local
+*.log
+
+# SD card / firmware artifacts
+*.img
+*.img.lz4
+*.zip
+*.run
+flashing/*.conf
+flashing/*.txt
+flashing/*.toml
+flashing/cloud-init/*
+flashing/bootfs/*
+
+# Runner binary/downloads
+actions-runner-linux-*
+tmp/
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+!tests/fixtures/*.key
+runner-token.txt
+runner-token-*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+
+# Python/venv
+__pycache__/
+*.pyc
+.venv/
+
+# OS-specific
+*.hdiutil

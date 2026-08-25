@@ -1,0 +1,28 @@
+---
+# Per-runner defaults. These mirror terraform variables so both layers agree.
+
+runner_user: runner
+runner_dir: /opt/actions-runner
+runner_version: ""          # empty => latest release
+runner_scope: repo          # repo | org
+runner_group: default       # org runner group (used when runner_scope == org)
+runner_labels: self-hosted,linux,arm64,pi
+runner_name: pi-runner-01
+
+# Registration token. Left empty => read from the file planted by cloud-init
+# (bootstrap/ansible-pull mode). Populate via terraform output for SSH mode.
+registration_token: ""
+token_file: /etc/pi-actions/registration-token
+
+github_owner: YOUR_GITHUB_OWNER
+repo_name: YOUR_REPO_NAME
+
+# Packages the runner needs on the Pi.
+runner_packages:
+  - curl
+  - ca-certificates
+  - tar
+  - git
+  - jq
+  - build-essential
+  - python3

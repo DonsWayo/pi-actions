@@ -1,0 +1,39 @@
+---
+- name: Initiate a graceful hostname change
+  ansible.builtin.command: hostname {{ runner_name }}
+  changed_when: false
+  when: runner_name is defined
+  notify:
+    - Update /etc/hostname
+
+- name: Ensure base packages are installed
+  ansible.builtin.apt:
+    name: "{{ base_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  notify: Restart networking
+
+- name: Set timezone
+  ansible.builtin.command: timedatectl set-timezone "{{ timezone | default('UTC') }}"
+  changed_when: false
+  when: timezone is defined
+
+- name: Disable first-boot wizard (runs on login)
+  ansible.builtin.file:
+    path: /etc/profile.d/raspi-config.sh
+    state: absent
+
+- name: Enable sshd
+  ansible.builtin.systemd:
+    name: ssh
+    enabled: true
+    state: started
+  when: enable_ssh | default(false)
+
+- name: Fetch external IP (for registering DNS/healthchecks later)
+  ansible.builtin.uri:
+    url: https://api.ipify.org
+    return_content: true
+  register: external_ip
+  changed_when: false

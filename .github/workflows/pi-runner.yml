@@ -1,0 +1,48 @@
+name: Pi Runner Smoke Test
+
+# Proves the self-hosted Raspberry Pi runner is alive and correctly labeled.
+#
+# SECURITY NOTE: self-hosted runners on a PUBLIC repo can be triggered by any
+# third party PR (approve/require-review not enforced by Actions). Restrict
+# triggers to trusted branches/paths and review the Security section in README.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "ansible/**"
+      - "terraform/**"
+      - ".github/**"
+
+concurrency:
+  group: pi-runner-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pi-info:
+    name: "On the Pi: ${{ runner.name }}"
+    # Must match the labels the runner was registered with (terraform var
+    # runner_labels). The runner only accepts jobs matching its labels.
+    runs-on: [self-hosted, linux, arm64, pi]
+    timeout-minutes: 10
+    steps:
+      - name: Identify hardware
+        run: |
+          echo "hostname : $(hostname)"
+          echo "kernel   : $(uname -a)"
+          echo "os       : $(cat /etc/os-release | grep PRETTY_NAME)"
+          echo "arch     : $(uname -m)"
+          cat /proc/cpuinfo | grep -m1 'Model'
+
+      - name: Drop a build artifact to prove job execution
+        run: |
+          mkdir -p artifact
+          uname -m > artifact/architecture.txt
+          date --iso-8601=seconds > artifact/built-at.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-runner-${{ runner.name }}
+          path: artifact/

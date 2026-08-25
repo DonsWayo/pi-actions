@@ -1,0 +1,16 @@
+---
+# Inventory for the self-hosted runner(s).
+#
+# Two usage modes:
+#   1. ansible-pull (on the Pi, first boot): targets `localhost,` — the Pi is
+#      the target. Use: ansible-pull -i localhost, ...
+#   2. provision.yml (from your machine, over SSH): add the Pi host below.
+
+all:
+  children:
+    runners:
+      hosts:
+        pi-runner-01:
+          ansible_host: 192.168.1.50        # set the Pi's IP when using SSH mode
+          ansible_user: runner               # used for SSH provisioning
+          ansible_python_interpreter: /usr/bin/python3

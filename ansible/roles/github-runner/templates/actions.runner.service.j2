@@ -1,0 +1,22 @@
+# GitHub Actions self-hosted runner for {{ runner_name }}
+# Runs as the dedicated runner user, starts on boot, restarts on failure.
+
+[Unit]
+Description=GitHub Actions runner ({{ runner_name }})
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User={{ runner_user }}
+Group={{ runner_user }}
+Type=simple
+WorkingDirectory={{ runner_dir }}
+ExecStart={{ runner_dir }}/run.sh
+Restart=always
+RestartSec=5
+Environment="RUNNER_OWNER={{ github_owner }}"
+Environment="RUNNER_REPO={{ repo_name }}"
+SuccessExitStatus=0
+
+[Install]
+WantedBy=multi-user.target

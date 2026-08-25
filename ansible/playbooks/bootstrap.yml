@@ -1,0 +1,20 @@
+---
+# First-boot playbook. Executed by cloud-init via `ansible-pull -i localhost,`
+# on the newly booted Raspberry Pi. Idempotent and safe to re-run.
+
+- name: Bootstrap the Pi as a self-hosted GitHub Actions runner
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  become: true
+
+  pre_tasks:
+    - name: Show bootstrap context
+      ansible.builtin.debug:
+        msg:
+          - "hostname={{ ansible_hostname }} arch={{ ansible_architecture }}"
+          - "scope={{ runner_scope | default('repo') }} labels={{ runner_labels | default('') }}"
+
+  roles:
+    - role: base
+    - role: github-runner

@@ -1,0 +1,129 @@
+---
+- name: Assert required runner settings
+  ansible.builtin.assert:
+    that:
+      - github_owner is defined and github_owner != 'YOUR_GITHUB_OWNER'
+      - repo_name is defined and repo_name != 'YOUR_REPO_NAME'
+      - runner_name is defined
+    msg: "Set github_owner / repo_name / runner_name (group_vars or --extra-vars)."
+
+- name: Gather required facts
+  ansible.builtin.setup:
+    filter:
+      - ansible_architecture
+      - ansible_env
+
+- name: Install runner prerequisite packages
+  ansible.builtin.apt:
+    name: "{{ runner_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create runner system user
+  ansible.builtin.user:
+    name: "{{ runner_user }}"
+    group: "{{ runner_user }}"
+    shell: /bin/bash
+    home: "/home/{{ runner_user }}"
+    create_home: true
+    system: true
+  notify: Ensure runner home perms
+
+- name: Create runner install directory
+  ansible.builtin.file:
+    path: "{{ runner_dir }}"
+    state: directory
+    owner: "{{ runner_user }}"
+    group: "{{ runner_user }}"
+    mode: "0755"
+    recurse: true
+
+- name: Map architecture to the runner asset name
+  ansible.builtin.set_fact:
+    runner_arch: "{{ runner_arch_map[ansible_architecture] }}"
+
+- name: Resolve latest runner version (or use pinned)
+  ansible.builtin.uri:
+    url: "{{ runner_releases_api }}"
+    return_content: true
+  register: runner_release
+  changed_when: false
+  when: runner_version | length == 0
+
+- name: Set resolved runner version
+  ansible.builtin.set_fact:
+    runner_version: "{{ runner_release.json.tag_name | trim | regex_replace('^v', '') }}"
+  when: runner_version | length == 0
+
+- name: Build runner download URL
+  ansible.builtin.set_fact:
+    runner_tarball: "{{ runner_download_base }}{{ runner_version }}/actions-runner-linux-{{ runner_arch }}-{{ runner_version }}.tar.gz"
+
+- name: Download runner
+  ansible.builtin.get_url:
+    url: "{{ runner_tarball }}"
+    dest: "/tmp/actions-runner.tar.gz"
+    mode: "0644"
+    force: false
+
+- name: Ensure runner is extracted
+  ansible.builtin.unarchive:
+    src: /tmp/actions-runner.tar.gz
+    dest: "{{ runner_dir }}"
+    remote_src: true
+    creates: "{{ runner_dir }}/bin/Runner.Listener"
+    owner: "{{ runner_user }}"
+    group: "{{ runner_user }}"
+    extra_opts:
+      - --strip-components=1
+
+# ---- Registration ----------------------------------------------------------
+
+- name: Determine registration token (var beats cloud-init file)
+  ansible.builtin.set_fact:
+    effective_token: "{{ registration_token | default('') | trim }}"
+
+- name: Read registration token from cloud-init-planted file
+  ansible.builtin.set_fact:
+    effective_token: "{{ lookup('file', token_file) | replace('\n', '') | trim }}"
+  when: effective_token | length == 0
+
+- name: Check whether the runner is already configured
+  ansible.builtin.stat:
+    path: "{{ runner_dir }}/.runner"
+  register: runner_configured
+
+- name: Register the runner with GitHub (unattended)
+  ansible.builtin.command: >
+    {{ runner_dir }}/config.sh
+    --unattended
+    --url {{ register_url }}
+    --token {{ effective_token }}
+    --name {{ runner_name }}
+    --labels {{ runner_labels.split(',') | map('trim') | join(',') }}
+    --replace
+    {% if runner_scope == 'org' %}--rungroup {{ runner_group }}{% endif %}
+  args:
+    chdir: "{{ runner_dir }}"
+  become: true
+  become_user: "{{ runner_user }}"
+  when: not runner_configured.stat.exists
+  notify: Restart runner service
+
+# ---- systemd service -------------------------------------------------------
+
+- name: Deploy runner systemd unit
+  ansible.builtin.template:
+    src: actions.runner.service.j2
+    dest: "/etc/systemd/system/actions.runner.{{ runner_name }}.service"
+    mode: "0644"
+  notify:
+    - Restart runner service
+
+- name: Enable + start the runner service
+  ansible.builtin.systemd:
+    name: "actions.runner.{{ runner_name }}.service"
+    enabled: true
+    state: started
+    daemon_reload: true

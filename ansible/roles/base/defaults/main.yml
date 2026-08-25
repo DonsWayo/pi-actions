@@ -1,0 +1,5 @@
+base_packages:
+  - raspi-config
+  - htop
+  - python3-pip
+  - ufw

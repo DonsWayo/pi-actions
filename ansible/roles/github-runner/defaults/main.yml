@@ -1,0 +1,26 @@
+---
+# Runtime defaults — see group_vars/runners.yml for per-runner overrides.
+
+runner_user: runner
+runner_dir: /opt/actions-runner
+runner_version: ""
+runner_arch_map:
+  aarch64: arm64
+  arm64: arm64
+  armv7l: arm
+  armv6l: arm
+  x86_64: x64
+  amd64: x64
+
+runner_work: "{{ runner_dir }}/_work"
+runner_releases_api: https://api.github.com/repos/actions/runner/releases/latest
+runner_download_base: https://github.com/actions/runner/releases/download/v
+
+# repo: URL -> https://github.com/OWNER/REPO ; org: URL -> https://github.com/OWNER
+register_url: "{{ (runner_scope == 'org') | ternary('https://github.com/' + github_owner, 'https://github.com/' + github_owner + '/' + repo_name) }}"
+
+registration_token: ""
+token_file: /etc/pi-actions/registration-token
+
+timezone: UTC
+enable_ssh: false

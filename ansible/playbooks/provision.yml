@@ -1,0 +1,27 @@
+---
+# Provision an already-reachable Pi over SSH (re-provisioning / migration path).
+#
+# Unlike bootstrap.yml (first boot, zero-SSH), this assumes you can SSH. It is
+# the tool you use when:
+#   * you changed runner labels/name and want to reconfigure,
+#   * the previous flash did not finish,
+#   * you registered the Pi into SSH mode manually.
+#
+# Required at call time (via --extra-vars):
+#   github_owner, repo_name, runner_name, and either registration_token or a
+#   token_file present on the host.
+
+- name: Provision self-hosted runner over SSH
+  hosts: runners
+  gather_facts: true
+  become: true
+
+  vars:
+    # These are normally overridden on the command line:
+    runner_scope: repo
+    runner_group: default
+    runner_labels: self-hosted,linux,arm64,pi
+
+  roles:
+    - role: base
+    - role: github-runner

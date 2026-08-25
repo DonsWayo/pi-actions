@@ -1,0 +1,14 @@
+---
+- name: Restart runner service
+  ansible.builtin.systemd:
+    name: "actions.runner.{{ runner_name }}.service"
+    state: restarted
+    daemon_reload: true
+
+- name: Ensure runner home perms
+  ansible.builtin.file:
+    path: "/home/{{ runner_user }}"
+    state: directory
+    owner: "{{ runner_user }}"
+    group: "{{ runner_user }}"
+    mode: "0700"
