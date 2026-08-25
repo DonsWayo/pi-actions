@@ -140,10 +140,28 @@ resolve_image() {
   echo "$url"
 }
 
-fetch_image() { # url -> local .img
-  local url="$1" f ext
+fetch_image() { # url-or-local-path -> local .img
+  local url="$1" f ext dir
   f="$(basename "$url")"
   ext="${f##*.}"
+
+  # Already an uncompressed local .img? Just use it.
+  if [[ "$ext" == "img" && -f "$url" ]]; then echo "$url"; return; fi
+
+  # Local but compressed? Decompress next to it.
+  if [[ -f "$url" ]]; then
+    dir="$(cd "$(dirname "$url")" && pwd)"
+    pushd "$dir" >/dev/null
+    case "$ext" in
+      xz)  info "Decompressing .xz";  xz --decompress --keep "$f"; f="${f%.xz}";;
+      zip) info "Unzipping";          unzip -o -q "$f"; f="${f%.zip}.img";;
+      lz4) info "Decompressing .lz4"; unlz4 "$f" "${f%.lz4}.img"; f="${f%.lz4}.img";;
+    esac
+    popd >/dev/null
+    echo "$dir/$f"; return
+  fi
+
+  # Remote URL -> download into REPO_ROOT, then decompress.
   pushd "$REPO_ROOT" >/dev/null
   info "Downloading ${f} ..."
   curl -fL "$url" -o "$f"
@@ -187,17 +205,34 @@ runcmd:
     set -eu
     exec >> /var/log/pi-actions-bootstrap.log 2>&1
     export DEBIAN_FRONTEND=noninteractive
-    apt-get update -y
-    apt-get install -y git ca-certificates curl
+
+    echo "[bootstrap] $(date) waiting for network"
+    for i in $(seq 1 60); do
+      if getent hosts github.com >/dev/null 2>&1 || ping -c1 -W2 1.1.1.1 >/dev/null 2>&1; then break; fi
+      sleep 2
+    done
+
+    echo "[bootstrap] $(date) installing tools"
+    for i in 1 2 3; do
+      if apt-get update -y && apt-get install -y git ca-certificates curl; then break; fi
+      sleep 5
+    done
+
     if ! command -v ansible-pull >/dev/null 2>&1; then
-      apt-get install -y ansible-core 2>/dev/null || apt-get install -y ansible 2>/dev/null \
+      (apt-get install -y ansible-core 2>/dev/null || apt-get install -y ansible 2>/dev/null) \
         || pip3 install --no-cache-dir --break-system-packages ansible-core
     fi
-    ansible-pull \
-      -U https://github.com/${GITHUB_OWNER}/${REPO_NAME}.git \
-      -C main -i localhost, --accept-new-host-key \
-      -e "runner_scope=${SCOPE} runner_name=${RUNNER_NAME} runner_user=runner runner_group=${GROUP} runner_labels=${LABELS} repo_name=${REPO_NAME} github_owner=${GITHUB_OWNER}" \
-      ansible/playbooks/bootstrap.yml
+
+    echo "[bootstrap] $(date) running ansible-pull"
+    for i in 1 2 3; do
+      if ansible-pull \
+        -U https://github.com/${GITHUB_OWNER}/${REPO_NAME}.git \
+        -C main -i localhost, --accept-new-host-key \
+        -e "runner_scope=${SCOPE} runner_name=${RUNNER_NAME} runner_user=runner runner_group=${GROUP} runner_labels=${LABELS} repo_name=${REPO_NAME} github_owner=${GITHUB_OWNER}" \
+        ansible/playbooks/bootstrap.yml; then break; fi
+      sleep 10
+    done
+    echo "[bootstrap] $(date) finished"
 EOF
 }
 
@@ -214,7 +249,7 @@ mount_boot() { # img
   local img="$1" disk
   local base
   base="$(basename "$img" .img)"
-  ATTACHED_DISK="$(hdiutil attach -nomount "$img" | awk '{print $NF}' | head -1)"
+  ATTACHED_DISK="$(hdiutil attach -nomount "$img" | awk 'NR==1{print $1}')"
   [[ -n "$ATTACHED_DISK" ]] || die "hdiutil attach failed for $img"
   # boot partition is the first FAT partition of the Pi image
   local bootdev

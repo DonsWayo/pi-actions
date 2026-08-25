@@ -50,22 +50,33 @@ runcmd:
 
     echo "[bootstrap] $(date) Starting Pi Actions bootstrap"
 
-    apt-get update -y
-    apt-get install -y git ca-certificates curl
+    echo "[bootstrap] $(date) waiting for network"
+    for i in $(seq 1 60); do
+      if getent hosts github.com >/dev/null 2>&1 || ping -c1 -W2 1.1.1.1 >/dev/null 2>&1; then break; fi
+      sleep 2
+    done
+
+    echo "[bootstrap] $(date) installing tools"
+    for i in 1 2 3; do
+      if apt-get update -y && apt-get install -y git ca-certificates curl; then break; fi
+      sleep 5
+    done
 
     if ! command -v ansible-pull >/dev/null 2>&1; then
-      apt-get install -y ansible-core 2>/dev/null \
-        || (apt-get install -y ansible 2>/dev/null) \
+      (apt-get install -y ansible-core 2>/dev/null || apt-get install -y ansible 2>/dev/null) \
         || pip3 install --no-cache-dir --break-system-packages ansible-core
     fi
 
-    echo "[bootstrap] Cloning + applying bootstrap playbook from ${repo_url}"
-    ansible-pull \
-      -U ${repo_url} \
-      -C ${git_branch} \
-      -i localhost, \
-      --accept-new-host-key \
-      -e "${ansible_vars}" \
-      ansible/playbooks/bootstrap.yml
+    echo "[bootstrap] $(date) Cloning + applying bootstrap playbook from ${repo_url}"
+    for i in 1 2 3; do
+      if ansible-pull \
+        -U ${repo_url} \
+        -C ${git_branch} \
+        -i localhost, \
+        --accept-new-host-key \
+        -e "${ansible_vars}" \
+        ansible/playbooks/bootstrap.yml; then break; fi
+      sleep 10
+    done
 
     echo "[bootstrap] $(date) Done. Runner should now register with GitHub."
