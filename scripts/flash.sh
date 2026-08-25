@@ -118,6 +118,10 @@ fi
 if [[ -z "$GITHUB_OWNER" || -z "$REPO_NAME" ]]; then
   die "provide --owner and --repo to point the runner at your repository"
 fi
+# --ssh-public-key takes a file path; inject its CONTENT into user-data.
+if [[ -n "$SSH_PUBKEY" && -f "$SSH_PUBKEY" ]]; then
+  SSH_PUBKEY="$(head -1 "$SSH_PUBKEY")"
+fi
 
 # ---- image resolution ------------------------------------------------------
 resolve_image() {
