@@ -44,6 +44,7 @@ LABELS="self-hosted,linux,arm64,pi"
 SCOPE="repo"
 GROUP="default"
 ENABLE_SSH=0
+SSH_PUBKEY=""
 TIMEZONE="UTC"
 FORCE=0
 
@@ -66,6 +67,7 @@ Usage: $0 [options]
   --wifi-ssid <ssid>     Wi-Fi SSID.
   --wifi-pass <pass>     Wi-Fi passphrase.
   --enable-ssh           Enable sshd on first boot (debug only).
+  --ssh-public-key <f>   Public key file to authorize (so you can SSH in to debug).
   --timezone <tz>        Timezone (default: UTC).
   --force                Skip the destructive flash confirmation prompt.
   -h, --help             Show this help.
@@ -95,6 +97,7 @@ while [[ $# -gt 0 ]]; do
     --wifi-ssid)     WIFI_SSID="$2"; shift 2;;
     --wifi-pass)     WIFI_PASS="$2"; shift 2;;
     --enable-ssh)    ENABLE_SSH=1; shift;;
+    --ssh-public-key) SSH_PUBKEY="$2"; shift 2;;
     --timezone)      TIMEZONE="$2"; shift 2;;
     --force)         FORCE=1; shift;;
     -h|--help)       usage;;
@@ -177,6 +180,17 @@ fetch_image() { # url-or-local-path -> local .img
 
 # ---- cloud-init user-data --------------------------------------------------
 gen_user_data() {
+  if [[ -n "$SSH_PUBKEY" ]]; then
+    KEYS_BLOCK="users:
+  - default
+
+ssh_authorized_keys:
+  - ${SSH_PUBKEY}
+
+"
+  else
+    KEYS_BLOCK=""
+  fi
   cat <<EOF
 #cloud-config
 hostname: ${RUNNER_NAME}
@@ -186,7 +200,7 @@ manage_etc_hosts: true
 ssh_pwauth: false
 disable_root: true
 
-write_files:
+${KEYS_BLOCK}write_files:
   - path: /etc/pi-actions/registration-token
     permissions: "0600"
     owner: root:root
@@ -265,18 +279,29 @@ mount_boot() { # img
 
 write_boot_files() {
   local mnt="$1"
-  local wpa="${mnt}/wpa_supplicant.conf"
+
+  # WiFi is provisioned via cloud-init network-config (netplan/networkd), which
+  # is the mechanism modern Raspberry Pi OS honours on first boot. Just dropping
+  # wpa_supplicant.conf is NOT honoured on newer images (Trixie+).
   if [[ -n "$WIFI_SSID" ]]; then
-    info "Writing Wi-Fi config"
-    cat >"$wpa" <<EOF
-country=US
-ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
-update_config=1
-network={
-    ssid="${WIFI_SSID}"
-    psk="${WIFI_PASS}"
-    key_mgmt=WPA-PSK
-}
+    info "Writing Wi-Fi network-config (netplan)"
+    cat >"${mnt}/network-config" <<EOF
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    eth0:
+      dhcp4: true
+      dhcp6: false
+      optional: true
+  wifis:
+    wlan0:
+      dhcp4: true
+      dhcp6: false
+      optional: false
+      access-points:
+        "${WIFI_SSID}":
+          password: "${WIFI_PASS}"
 EOF
   else
     warn "no --wifi-ssid provided; the Pi will need Ethernet"
