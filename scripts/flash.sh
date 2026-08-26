@@ -183,54 +183,86 @@ fetch_image() { # url-or-local-path -> local .img
 }
 
 # ---- cloud-init user-data --------------------------------------------------
+# Modern Raspberry Pi OS (Bookworm+) uses NetworkManager. Wi-Fi is pre-wired by
+# writing an .nmconnection into /etc/NetworkManager/system-connections — the same
+# thing Raspberry Pi Imager / its `imager_custom set_wlan` does. netplan is NOT
+# installed on these images, so network-config is a dead end.
+#
+# IMPORTANT: the template uses a QUOTED heredoc so `$(...)`, backticks and `$var`
+# inside the runcmd shell script are NOT expanded at build time. Values are
+# injected afterwards by render_user_data() via @@PLACEHOLDER@@ tokens.
 gen_user_data() {
-  if [[ -n "$SSH_PUBKEY" ]]; then
-    KEYS_BLOCK="users:
-  - default
-
-ssh_authorized_keys:
-  - ${SSH_PUBKEY}
-
-"
-  else
-    KEYS_BLOCK=""
-  fi
-  cat <<EOF
+  cat <<'YAML'
 #cloud-config
-hostname: ${RUNNER_NAME}
+hostname: @@RUNNER_NAME@@
 preserve_hostname: false
-timezone: ${TIMEZONE}
+timezone: @@TIMEZONE@@
 manage_etc_hosts: true
 ssh_pwauth: false
 disable_root: true
 
-${KEYS_BLOCK}write_files:
+@@SSHBLOCK@@write_files:
+  # Short-lived GitHub runner registration token.
   - path: /etc/pi-actions/registration-token
     permissions: "0600"
     owner: root:root
     content: |
-      ${TOKEN}
+      @@TOKEN@@
   - path: /etc/pi-actions/environment
     permissions: "0644"
     owner: root:root
     content: |
-      PI_ACTION_REPO=${REPO_NAME}
-      PI_ACTION_OWNER=${GITHUB_OWNER}
+      PI_ACTION_REPO=@@REPO@@
+      PI_ACTION_OWNER=@@OWNER@@
+  # Wi-Fi: NetworkManager connection profile (persists across reboots).
+  - path: /etc/NetworkManager/system-connections/preconfigured.nmconnection
+    permissions: "0600"
+    owner: root:root
+    content: |
+      [connection]
+      id=preconfigured
+      uuid=9b1ce0a3-8c76-4ff2-b2ee-8c923f8a0001
+      type=wifi
+      autoconnect=true
+      [wifi]
+      mode=infrastructure
+      ssid=@@SSID@@
+      hidden=false
+      [ipv4]
+      method=auto
+      [ipv6]
+      addr-gen-mode=default
+      method=auto
+      [wifi-security]
+      key-mgmt=wpa-psk
+      psk=@@PASS@@
+  # Wi-Fi country so the radio is usable.
+  - path: /etc/default/crda
+    permissions: "0644"
+    owner: root:root
+    content: |
+      REGDOMAIN=US
 
 runcmd:
   - "[sh, -c, 'systemctl enable --now ssh || true']"
+  - "[sh, -c, 'nmcli connection reload || true; nmcli device wifi rescan || true; iw reg set US || true']"
   - |
     set -eu
     exec >> /var/log/pi-actions-bootstrap.log 2>&1
     export DEBIAN_FRONTEND=noninteractive
 
-    echo "[bootstrap] $(date) waiting for network"
-    for i in $(seq 1 60); do
+    echo "[bootstrap] ensuring Wi-Fi connection"
+    nmcli device wifi connect "@@SSID@@" password "@@PASS@@" ifname wlan0 >/dev/null 2>&1 || true
+
+    echo "[bootstrap] waiting for network"
+    i=0
+    while [ "$i" -lt 60 ]; do
       if getent hosts github.com >/dev/null 2>&1 || ping -c1 -W2 1.1.1.1 >/dev/null 2>&1; then break; fi
       sleep 2
+      i=$((i+1))
     done
 
-    echo "[bootstrap] $(date) installing tools"
+    echo "[bootstrap] installing tools"
     for i in 1 2 3; do
       if apt-get update -y && apt-get install -y git ca-certificates curl; then break; fi
       sleep 5
@@ -241,17 +273,47 @@ runcmd:
         || pip3 install --no-cache-dir --break-system-packages ansible-core
     fi
 
-    echo "[bootstrap] $(date) running ansible-pull"
+    echo "[bootstrap] running ansible-pull"
     for i in 1 2 3; do
       if ansible-pull \
-        -U https://github.com/${GITHUB_OWNER}/${REPO_NAME}.git \
+        -U https://github.com/@@OWNER@@/@@REPO@@.git \
         -C main -i localhost, --accept-new-host-key \
-        -e "runner_scope=${SCOPE} runner_name=${RUNNER_NAME} runner_user=runner runner_group=${GROUP} runner_labels=${LABELS} repo_name=${REPO_NAME} github_owner=${GITHUB_OWNER}" \
+        -e "runner_scope=@@SCOPE@@ runner_name=@@RUNNER_NAME@@ runner_user=runner runner_group=@@GROUP@@ runner_labels=@@LABELS@@ repo_name=@@REPO@@ github_owner=@@OWNER@@" \
         ansible/playbooks/bootstrap.yml; then break; fi
       sleep 10
     done
-    echo "[bootstrap] $(date) finished"
-EOF
+    echo "[bootstrap] finished"
+YAML
+}
+
+render_user_data() { # src dst
+  local src="$1" dst="$2"
+  python3 - "$src" "$dst" \
+    "$TOKEN" "$WIFI_SSID" "$WIFI_PASS" "$SSH_PUBKEY" \
+    "$RUNNER_NAME" "$REPO_NAME" "$GITHUB_OWNER" "$TIMEZONE" \
+    "$SCOPE" "$GROUP" "$LABELS" <<'PY'
+import sys
+src,dst = sys.argv[1], sys.argv[2]
+token,ssid,pw,key,rn,repo,owner,tz,scope,group,labels = sys.argv[3:14]
+t = open(src).read()
+ssh = (f"users:\n  - default\n\nssh_authorized_keys:\n  - {key}\n\n" ) if key else ""
+rep = {
+  "@@SSHBLOCK@@": ssh,
+  "@@TOKEN@@": token,
+  "@@SSID@@": ssid,
+  "@@PASS@@": pw,
+  "@@RUNNER_NAME@@": rn,
+  "@@REPO@@": repo,
+  "@@OWNER@@": owner,
+  "@@TIMEZONE@@": tz,
+  "@@SCOPE@@": scope,
+  "@@GROUP@@": group,
+  "@@LABELS@@": labels,
+}
+for k,v in rep.items():
+    t = t.replace(k, v)
+open(dst,"w").write(t)
+PY
 }
 
 # Boot partition helpers (macOS) --------------------------------------------
@@ -284,39 +346,24 @@ mount_boot() { # img
 write_boot_files() {
   local mnt="$1"
 
-  # WiFi is provisioned via cloud-init network-config (netplan/networkd), which
-  # is the mechanism modern Raspberry Pi OS honours on first boot. Just dropping
-  # wpa_supplicant.conf is NOT honoured on newer images (Trixie+).
-  if [[ -n "$WIFI_SSID" ]]; then
-    info "Writing Wi-Fi network-config (netplan)"
-    cat >"${mnt}/network-config" <<EOF
-network:
-  version: 2
-  renderer: networkd
-  ethernets:
-    eth0:
-      dhcp4: true
-      dhcp6: false
-      optional: true
-  wifis:
-    wlan0:
-      dhcp4: true
-      dhcp6: false
-      optional: false
-      access-points:
-        "${WIFI_SSID}":
-          password: "${WIFI_PASS}"
-EOF
-  else
+  # Wi-Fi is provisioned through cloud-init's NetworkManager .nmconnection
+  # (written into the rootfs by user-data). We do NOT touch network-config —
+  # netplan is not installed on modern Pi OS images.
+  if [[ -z "$WIFI_SSID" ]]; then
     warn "no --wifi-ssid provided; the Pi will need Ethernet"
+  else
+    info "Wi-Fi (Mesh. SSID=$WIFI_SSID) provisioned via NetworkManager .nmconnection"
   fi
 
   info "Writing cloud-init user-data"
+  tmp_data="$(mktemp)"
   if [[ -n "$USER_DATA_FILE" ]]; then
     cp "$USER_DATA_FILE" "${mnt}/user-data"
   else
-    gen_user_data > "${mnt}/user-data"
+    gen_user_data > "$tmp_data"
+    render_user_data "$tmp_data" "${mnt}/user-data"
   fi
+  rm -f "$tmp_data"
   printf 'instance-id: pi-actions\n' > "${mnt}/meta-data"
 
   if [[ "$ENABLE_SSH" == "1" ]]; then
