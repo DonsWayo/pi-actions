@@ -35,6 +35,11 @@ flashing/bootfs/*
 actions-runner-linux-*
 tmp/
 
+# Stray home directories. An unexpanded `~` in a shell command (e.g.
+# `mkdir -p '~/project'` run inside a clone) leaves a directory literally
+# named `~` at the repository root. Escaped so git treats it as a literal.
+**/\~/
+
 # Secrets
 .env
 .env.*
