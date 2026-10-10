@@ -11,8 +11,8 @@ runner. **No SSH. No manual login. Zero-config first boot.**
 │         │                      │  runner    │  token (~1h) │
 └────┬────┘                      └────────────┴──────┬───────┘
      │ flash.sh writes SD card:                      │
-     │   Pi OS image + wpa_supplicant + user-data    │
-     │   (cloud-init carries the token)              │
+     │    Pi OS image + user-data + meta-data        │
+     │    (cloud-init carries token and Wi-Fi)       │
      ▼                                               │
 ┌─────────────┐  first boot  ┌──────────────────────┐│
 │   SD card   │─────────────▶│  Pi runs cloud-init  ││
@@ -28,10 +28,18 @@ runner. **No SSH. No manual login. Zero-config first boot.**
 |-------|------|---------|
 | **Terraform** | `terraform/` | GitHub repo, org runner group, runner labels, **registration token**, cloud-init `user-data` generation |
 | **Ansible** | `ansible/` | `base` + `github-runner` roles: installs the arm64 runner, registers it, installs a systemd unit so it auto-starts |
-| **Cloud-init** | `cloud-init/` + generated | First-boot bootstrap (Wi-Fi, hostname, ssh toggle, `ansible-pull`) |
+| **Cloud-init** | `cloud-init/` + generated | First-boot bootstrap (hostname, timezone, ssh toggle, `ansible-pull`) |
 | **Scripts** | `scripts/` | `flash.sh` (build/flash card), `get-token.sh`, `healthcheck.sh`, `register.sh` |
 | **Workflows** | `.github/workflows/` | Sample job that runs on `[self-hosted, linux, arm64, pi]` |
 | **Makefile** | `Makefile` | Convenience targets |
+
+Wi-Fi is wired by `scripts/flash.sh` (`--wifi-ssid`/`--wifi-pass`): it writes a
+NetworkManager `.nmconnection` into the rootfs through `user-data`, not a
+`wpa_supplicant.conf`. The Terraform-rendered user-data
+(`terraform/generated/user-data`) provisions the hostname, timezone,
+registration token and `ansible-pull`, but no Wi-Fi — a card built from that
+file needs Ethernet. The `wifi_ssid` and `wifi_password` Terraform variables are
+declared but not referenced by any template, so setting them has no effect.
 
 ## Requirements
 
@@ -40,9 +48,12 @@ runner. **No SSH. No manual login. Zero-config first boot.**
 - Tools on your laptop:
   - `terraform` ≥ 1.5
   - `gh` CLI (authenticated: `gh auth login`)
-  - `curl`, `xz`
+  - `curl`, `xz`, `python3` (`flash.sh` renders user-data through `python3`)
+  - `jq` (used by `healthcheck.sh`)
   - `ansible` (only needed for the SSH provision path)
-  - macOS: `hdiutil`/`diskutil` (built in) — Linux: `kpartx`
+  - macOS: `hdiutil`/`diskutil` (built in), plus `sudo` for the `dd`. `flash.sh`
+    uses those tools throughout and refuses to write to anything but a
+    `/dev/disk*` device, so there is no Linux flashing path yet.
 - A GitHub token exported as `GITHUB_TOKEN`. Minimum scopes:
   - `repo` (create/manage the repo + registration token)
   - `admin:org` (only if you register into an **org** runner group)
@@ -112,6 +123,13 @@ cd ansible
 ansible-playbook -i inventory.yml --ask-become-pass playbooks/provision.yml \
   -e "github_owner=<owner> repo_name=<repo> runner_name=pi-runner-01"
 ```
+
+The `github-runner` role takes the registration token from the
+`registration_token` variable, and falls back to `token_file`
+(`/etc/pi-actions/registration-token`) on the Pi — the file cloud-init plants
+on the zero-SSH path. With neither present it cannot register. `register.sh`
+fetches a token with `get-token.sh` and passes it as an extra var, which puts it
+in the process list; plant the file by hand if you would rather not.
 
 ## Registry & runner details
 
