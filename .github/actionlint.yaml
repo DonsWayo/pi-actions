@@ -1,0 +1,6 @@
+# Custom labels registered on the self-hosted runners. Must stay in sync with
+# terraform variable runner_labels (defaults to ["pi", "arm64", "linux",
+# "self-hosted"], with the last three always appended by terraform/runner.tf).
+self-hosted-runner:
+  labels:
+    - pi
