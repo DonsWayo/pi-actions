@@ -2,18 +2,17 @@ name: Pi Runner Smoke Test
 
 # Proves the self-hosted Raspberry Pi runner is alive and correctly labeled.
 #
+# Dispatch-only on purpose: until a runner is registered (terraform/ansible
+# bring one up), a push-triggered run would sit queued forever waiting for a
+# runner that matches [self-hosted, linux, arm64, pi]. Dispatch it manually
+# once the runner is online: gh workflow run pi-runner.yml
+#
 # SECURITY NOTE: self-hosted runners on a PUBLIC repo can be triggered by any
 # third party PR (approve/require-review not enforced by Actions). Restrict
 # triggers to trusted branches/paths and review the Security section in README.
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "ansible/**"
-      - "terraform/**"
-      - ".github/**"
 
 concurrency:
   group: pi-runner-${{ github.ref }}
@@ -21,7 +20,10 @@ concurrency:
 
 jobs:
   pi-info:
-    name: "On the Pi: ${{ runner.name }}"
+    # The runner context is not available in job-level "name" (GitHub rejects
+    # the whole workflow on it); the hostname is printed by the first step and
+    # names the artifact below instead.
+    name: "On the Pi"
     # Must match the labels the runner was registered with (terraform var
     # runner_labels). The runner only accepts jobs matching its labels.
     runs-on: [self-hosted, linux, arm64, pi]

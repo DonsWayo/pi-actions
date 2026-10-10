@@ -30,7 +30,7 @@ runner. **No SSH. No manual login. Zero-config first boot.**
 | **Ansible** | `ansible/` | `base` + `github-runner` roles: installs the arm64 runner, registers it, installs a systemd unit so it auto-starts |
 | **Cloud-init** | `cloud-init/` + generated | First-boot bootstrap (hostname, timezone, ssh toggle, `ansible-pull`) |
 | **Scripts** | `scripts/` | `flash.sh` (build/flash card), `get-token.sh`, `healthcheck.sh`, `register.sh` |
-| **Workflows** | `.github/workflows/` | Sample job that runs on `[self-hosted, linux, arm64, pi]` |
+| **Workflows** | `.github/workflows/` | Sample smoke-test job, dispatched manually, that runs on `[self-hosted, linux, arm64, pi]` |
 | **Makefile** | `Makefile` | Convenience targets |
 
 Wi-Fi is wired by `scripts/flash.sh` (`--wifi-ssid`/`--wifi-pass`): it writes a
@@ -100,8 +100,9 @@ TOKEN="$(terraform output -raw registration_token)"
 
 ```bash
 # 6. Prove it works — run the smoke test workflow
-#    dispatch:  gh workflow run pi-runner.yml --repo <owner>/<repo>
-#    or trigger on a push to main. The job runs ON THE PI.
+#    gh workflow run pi-runner.yml --repo <owner>/<repo>
+#    The job runs ON THE PI. It is dispatch-only: with no runner registered
+#    yet, a push-triggered run would queue forever.
 ```
 
 ## Reprovision / reconfigure an existing Pi (over SSH)
